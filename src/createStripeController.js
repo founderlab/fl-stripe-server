@@ -139,7 +139,7 @@ export default function createStripeController(_options) {
 
   app.post(`${options.route}/cards`, auth, createCard)
   app.get(`${options.route}/cards`, auth, listCards)
-  app.del(`${options.route}/cards`, auth, deleteCard)
+  app.delete(`${options.route}/cards`, auth, deleteCard)
 
   app.post(`${options.route}/charge`, auth, chargeCard)
 
