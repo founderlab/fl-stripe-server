@@ -1,4 +1,5 @@
 import _ from 'lodash'
+import Queue from 'queue-async'
 import createStripe from 'stripe'
 import {createAuthMiddleware} from 'fl-auth-server'
 import createStripeCustomer from './models/createStripeCustomer'
@@ -6,12 +7,12 @@ import createStripeCustomer from './models/createStripeCustomer'
 const defaults = {
   route: '/api/stripe',
   manualAuthorisation: false,
-  customerWhitelist: ['id'],
+  cardWhitelist: ['id', 'country', 'brand', 'last4'],
 }
 
 function sendError(res, err, msg) {
   console.log('[fl-stripe-server] error:', err)
-  res.status(500).send(message)
+  res.status(500).send(msg)
 }
 
 export default function createStripeController(_options) {
@@ -30,12 +31,12 @@ export default function createStripeController(_options) {
     if (user.admin || user.get('admin')) return callback(null, true)
 
     // Allow access for the owner of the profile
-    if (req.method === 'GET' && query.user_id == user.id) {
+    if (req.method === 'GET' && req.query.user_id === user.id.toString()) {
       return callback(null, true)
     }
 
     // Allow creating for logged in user, charging cards
-    else if (req.method === 'POST' && req.body.user_id == user.id) {
+    else if (req.method === 'POST' && req.body.user_id === user.id.toString()) {
       return callback(null, true)
     }
 
@@ -47,42 +48,42 @@ export default function createStripeController(_options) {
     callback(null, false)
   }
 
-  const auth = options.manualAuthorisation ? options.auth : [...options.auth, createAuthMiddleware({canAccess})]
-
-
   function createCard(req, res) {
     const token = req.body.token // obtained with Stripe.js
     const user_id = req.user.id
-    const msg = 'Error creating stripe customer'
     let customer = null
 
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id: req.query.user_id}, (err, _customer) => {
+    StripeCustomer.findOne({user_id}, (err, _customer) => {
       if (err) return sendError(res, err, 'Error creating new customer')
       customer = _customer
       const queue = new Queue(1)
 
       // Create a new customer if we don't have one
-      if (!customer) queue.defer(callback => {
-        stripe.customers.create({description: `User ${user.get('email')}`, source: token}, (err, customerJSON) => {
-          if (err) return sendError(res, err, 'Stripe error creating customer')
-          console.log('customerJSON', customerJSON)
+      if (!customer) {
+        queue.defer(callback => {
+          stripe.customers.create({description: `User ${req.user.get('email')}`, source: token}, (err, customerJSON) => {
+            if (err) return sendError(res, err, 'Stripe error creating customer')
 
-          customer = new StripeCustomer({user_id: user.id, stripeId: customerJSON.id})
-          customer.save(err => {
-            if (err) return sendError(res, err, 'Error saving new customer')
+            customer = new StripeCustomer({user_id, stripeId: customerJSON.id})
+            customer.save(err => {
+              if (err) return sendError(res, err, 'Error saving new customer')
+              callback()
+            })
           })
-        })
 
-      })
+        })
+      }
 
       // Add the new card to the current record if we do
-      else queue.defer(callback => {
-        stripe.customers.createSource(customer.get('stripeId'), {source: token}, err => {
-          if (err) return sendError(res, err, 'Stripe error creating new card')
-          callback()
+      else {
+        queue.defer(callback => {
+          stripe.customers.createSource(customer.get('stripeId'), {source: token}, err => {
+            if (err) return sendError(res, err, 'Stripe error creating new card')
+            callback()
+          })
         })
-      })
+      }
 
       queue.await(err => {
         if (err) return sendError(res, err)
@@ -100,35 +101,53 @@ export default function createStripeController(_options) {
   }
 
   function listCards(req, res) {
-    StripeCustomer.cursor({user_id: req.query.user_id}).select(options.customerWhitelist).toJSON((err, customers) => {
-      if (err) return sendError(res, err, 'Error retrieving payment information')
+    const user_id = req.user.id
 
-      stripe.customers.listCards('cus_96yeiExgGaCRSE', function(err, cards) {
-        // asynchronously called
-      });
-      res.json(customers)
-      // lookup stripe customer?
+    StripeCustomer.findOne({user_id}, (err, customer) => {
+      if (err) return sendError(res, err, 'Error retrieving payment information')
+      if (!customer) return res.status(404)
+
+      stripe.customers.listCards(customer.get('stripeId'), (err, json) => {
+        if (err) return sendError(res, err, 'Stripe error retrieving payment information')
+        res.json(_.map(json.data, card => _.pick(card, options.cardWhitelist)))
+      })
     })
   }
 
   function deleteCard(req, res) {
+    const user_id = req.user.id
+    const cardId = req.body.id
+
+    // Check for an existing (local) stripe customer record
+    StripeCustomer.findOne({user_id}, (err, customer) => {
+      if (err) return sendError(res, err, 'Error creating new customer')
+      if (!customer) return res.status(404)
+
+      stripe.customers.deleteCard(customer.get('stripeId'), cardId, err => {
+        if (err) return sendError(res, err, 'Stripe error creating new card')
+        res.json({id: customer.id})
+      })
+    })
 
   }
 
-  function chargeCustomer(req, res) {
-
+  function charge(req, res) {
+    return res.json({})
   }
 
-  app.get(`${options.route}/cards`, options.auth, listCards)
-  app.post(`${options.route}/cards`, options.auth, createCard)
-  app.del(`${options.route}/cards`, options.auth, deleteCard)
+  const auth = options.manualAuthorisation ? options.auth : [...options.auth, createAuthMiddleware({canAccess})]
 
-  app.post(`${options.route}/charge`, options.auth, chargeCustomer)
+  app.post(`${options.route}/cards`, auth, createCard)
+  app.get(`${options.route}/cards`, auth, listCards)
+  app.del(`${options.route}/cards`, auth, deleteCard)
+
+  app.post(`${options.route}/charge`, auth, charge)
 
   return {
     canAccess,
-    createCustomer,
-    listCustomers,
+    createCard,
+    listCards,
+    deleteCard,
     charge,
     StripeCustomer,
   }

@@ -8,9 +8,10 @@ if (!dbUrl) console.log('Missing process.env.DATABASE_URL')
 
 export default function createStripeCustomer(User) {
   class StripeCustomer extends Backbone.Model {
-    url = `${dbUrl}/stripe_customer`
+    url = `${dbUrl}/stripeCustomer`
 
     schema = () => ({
+      stripeId: 'String',
       user: () => ['belongsTo', User],
     })
 

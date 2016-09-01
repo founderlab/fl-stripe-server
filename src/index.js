@@ -1,3 +1,4 @@
 import createStripeController from './createStripeController'
+import createStripeCustomer from './models/createStripeCustomer'
 
-export default {createStripeController}
+export default {createStripeController, createStripeCustomer}

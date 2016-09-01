@@ -1,10 +1,14 @@
 import assert from 'assert'
 import {spy} from 'sinon'
-import {createStripeController} from '../src'
+import {createStripeController, createStripeCustomer} from '../src'
+import User from './User'
 
-let loggedInUser = new User({email: 'a@b.co'})
+const stripe = require('stripe')(process.env.STRIPE_API_KEY)
+const StripeCustomer = createStripeCustomer(User)
 
-function createApp({query, body}) {
+const user = new User({email: 'a@b.co'})
+
+function createApp() {
   return {
     get: spy(),
     post: spy(),
@@ -12,19 +16,19 @@ function createApp({query, body}) {
   }
 }
 
-function createReq({query, body}) {
+function createReq(query={}, body={}) {
   return {
     query,
     body,
-    user: loggedInUser,
+    user,
   }
 }
 
-function createRes() {
+function createRes(jsonFn) {
   return {
     status: spy(),
     send: spy(),
-    json: spy(),
+    json: jsonFn,
   }
 }
 
@@ -38,208 +42,105 @@ function createOptions() {
 describe('StripeController', () => {
 
   before(done => {
-    loggedInUser.save(done)
+    StripeCustomer.resetSchema(() => User.resetSchema(() => user.save(done)))
   })
 
-  it('Creates', () => {
-    const stripeController = createStripeController(options())
+  it('Creates the stripe controller', done => {
+    createStripeController(createOptions())
+    done()
+  })
+
+  it('Can create a customer', done => {
+    const {createCard} = createStripeController(createOptions())
+
+    createCard(createReq(), createRes(json => {
+      assert.ok(json)
+      assert.ok(json.id)
+
+      StripeCustomer.cursor({user_id: user.id}).toJSON((err, custs) => {
+        assert.ifError(err)
+        assert.ok(custs)
+        assert.equal(custs.length, 1)
+        done()
+      })
+
+    }))
 
   })
 
-  // it('Passes through an action with a request field that isnt a function', () => {
-  //   const next = createSpy()
-  //   const action = {type: TYPE, request: 'lol'}
-  //   const middleware = createRequestMiddleware({retry: false})
-  //   middleware()(next)(action)
-  //   assert.ok(next.calledOnce)
-  // })
+  it('Can add a card using a token', done => {
+    const {createCard} = createStripeController(createOptions())
 
-  // it('Passes through an action with a custom extractRequest method that isnt a function', () => {
-  //   const next = createSpy()
-  //   const action = {type: TYPE, req: 'lol', request: () => {}}
-  //   const middleware = createRequestMiddleware({
-  //     extractRequest: action => {
-  //       const {req, callback, ...rest} = action
-  //       return {request: req, callback, action: rest}
-  //     },
-  //     retry: false,
-  //   })
-  //   middleware()(next)(action)
-  //   assert.ok(next.calledOnce)
-  // })
+    stripe.tokens.create({
+      card: {
+        number: '4242424242424242',
+        exp_month: '12',
+        exp_year: '2017',
+        cvc: '123',
+      },
+    }, (err, token) => {
+      createCard(createReq({}, {token: token.id}), createRes(json => {
+        assert.ok(json)
+        done()
+      }))
+    })
+  })
 
-  // it('Calls a request', () => {
-  //   const req = {end: spy(callback => callback(null, {ok: true}))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
+  it('Can list a users cards', done => {
+    const {listCards} = createStripeController(createOptions())
 
-  //   const middleware = createRequestMiddleware({retry: false})
-  //   middleware()(next)(action)
+    listCards(createReq(), createRes(json => {
+      assert.ok(json)
+      assert.equal(json.length, 1)
+      done()
+    }))
 
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
+  })
 
-  // it('Calls a request with retries', () => {
-  //   const times = 4
-  //   let called = 0
-  //   const req = {end: spy(callback => called++ < times-2 ? callback('Err') : callback(null, {ok: true}))}
-  //   const next = createMiddlewareSpy()
+  it('Can charge a card', done => {
+    const {listCards, chargeCard} = createStripeController(createOptions())
 
-  //   const action = {type: TYPE, request: req, callback: err => {
-  //     assert.ok(!err)
-  //     assert.ok(next.calledTwice)
-  //     assert.equal(req.end.callCount, times-2)
-  //   }}
+    listCards(createReq(), createRes(json => {
+      assert.ok(json)
+      assert.equal(json.length, 1)
 
-  //   const middleware = createRequestMiddleware({retry: {times}})
-  //   middleware()(next)(action)
-  // })
+      const id = json[0].id
+      const req = createReq({}, {id})
+      const res = createRes(json => {
+        assert.ok(json)
+        assert.ifError(res.status.called)
+        done()
+      })
 
-  // it('Succeeds when res.ok isnt false', () => {
-  //   const req = {end: spy(callback => callback(null, [{json: 'yep'}]))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
+      chargeCard(req, res)
+    }))
 
-  //   const middleware = createRequestMiddleware({retry: false})
-  //   middleware()(next)(action)
+  })
 
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
+  it('Can delete a card', done => {
+    const {listCards, deleteCard} = createStripeController(createOptions())
 
-  // it('Calls a pure function request', () => {
-  //   const req = spy(callback => callback(null, {ok: true}))
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
+    listCards(createReq(), createRes(json => {
+      assert.ok(json)
+      assert.equal(json.length, 1)
 
-  //   const middleware = createRequestMiddleware({retry: false})
-  //   middleware()(next)(action)
+      const id = json[0].id
+      const req = createReq({}, {id})
+      const res = createRes(json => {
+        assert.ok(json)
+        assert.ifError(res.status.called)
 
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.calledOnce)
-  // })
 
-  // it('Custom parses a response', () => {
-  //   const req = {end: spy(callback => callback(null, {ok: true}))}
-  //   const next = createMiddlewareSpy()
-  //   const wrapper = action => {
-  //     if (action.type === TYPE + suffixes.SUCCESS) assert.equal(action.changed, 'yup')
-  //     next(action)
-  //   }
-  //   const action = {type: TYPE, request: req, parseResponse: action => ({changed: 'yup', ...action})}
+        listCards(createReq(), createRes(json => {
+          assert.ok(json)
+          assert.equal(json.length, 0)
+          done()
+        }))
+      })
 
-  //   const middleware = createRequestMiddleware({retry: false})
-  //   middleware()(wrapper)(action)
+      deleteCard(req, res)
+    }))
 
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
+  })
 
-  // it('Calls a request then calls a callback', () => {
-  //   const req = {end: spy(callback => callback(null, {ok: true}))}
-  //   const next = createMiddlewareSpy()
-  //   const callback = spy(err => {assert.ok(!err)})
-  //   const action = {callback, type: TYPE, request: req}
-
-  //   const middleware = createRequestMiddleware({retry: false})
-  //   middleware()(next)(action)
-
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(callback.calledOnce)
-  //   assert.ok(req.end.calledOnce)
-  // })
-
-  // it('Calls a request with config', () => {
-  //   const req = {next: spy(callback => callback(null, {ok: true}))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, aRequest: req}
-
-  //   const extractRequest = (action) => {
-  //     const {aRequest, ...rest} = action
-  //     return {request: aRequest, action: rest}
-  //   }
-  //   const getEndFn = request => request.next.bind(request)
-
-  //   const middleware = createRequestMiddleware({extractRequest, getEndFn, retry: false})
-  //   middleware()(next)(action)
-
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.next.calledOnce)
-  // })
-
-  // it('Errors from an error callback', () => {
-  //   const req = {end: spy(callback => callback(new Error('failed')))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
-
-  //   const middleware = createRequestMiddleware({retry: false})
-  //   middleware()(next)(action)
-
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
-
-  // it('Errors from an error callback after retries', () => {
-  //   const times = 4
-  //   const req = {end: spy(callback => callback(new Error('failed')))}
-  //   const next = createMiddlewareSpy()
-
-  //   const action = {type: TYPE, request: req, callback: err => {
-  //     assert.ok(err)
-  //     assert.ok(next.calledTwice)
-  //     assert.equal(req.end.callCount, times-1)
-  //   }}
-
-  //   const middleware = createRequestMiddleware({retry: {times, interval: 1}})
-  //   middleware()(next)(action)
-  // })
-
-  // it('Errors from an error body property', () => {
-  //   const req = {end: spy(callback => callback(null, {body: {error: 'failed'}}))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
-
-  //   const middleware = createRequestMiddleware()
-  //   middleware()(next)(action)
-
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
-
-  // it('Errors from a bad status', () => {
-  //   const req = {end: spy(callback => callback(null, {ok: false, body: 'some stack trace'}))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
-
-  //   const middleware = createRequestMiddleware()
-  //   middleware()(next)(action)
-
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
-
-  // it('Errors from a bad status without a body', () => {
-  //   const req = {end: spy(callback => callback(null, {ok: false, body: null, status: 500}))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
-
-  //   const middleware = createRequestMiddleware()
-  //   middleware()(next)(action)
-
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
-
-  // it('Errors from a bad status without a body or status', () => {
-  //   const req = {end: spy(callback => callback(null, {ok: false, body: null, status: null}))}
-  //   const next = createMiddlewareSpy()
-  //   const action = {type: TYPE, request: req}
-
-  //   const middleware = createRequestMiddleware()
-  //   middleware()(next)(action)
-
-  //   assert.ok(next.calledTwice)
-  //   assert.ok(req.end.calledOnce)
-  // })
 })
