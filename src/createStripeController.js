@@ -131,7 +131,7 @@ export default function createStripeController(_options) {
 
   }
 
-  function charge(req, res) {
+  function chargeCard(req, res) {
     return res.json({})
   }
 
@@ -148,7 +148,7 @@ export default function createStripeController(_options) {
     createCard,
     listCards,
     deleteCard,
-    charge,
+    chargeCard,
     StripeCustomer,
   }
 }
