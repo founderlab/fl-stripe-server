@@ -141,7 +141,7 @@ export default function createStripeController(_options) {
   app.get(`${options.route}/cards`, auth, listCards)
   app.del(`${options.route}/cards`, auth, deleteCard)
 
-  app.post(`${options.route}/charge`, auth, charge)
+  app.post(`${options.route}/charge`, auth, chargeCard)
 
   return {
     canAccess,
