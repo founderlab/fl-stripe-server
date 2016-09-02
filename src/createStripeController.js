@@ -40,6 +40,11 @@ export default function createStripeController(_options) {
       return callback(null, true)
     }
 
+    // We'll set the user id to the logged in user when calling the stripe api, so Stripe will deny any invalid card ids
+    else if (req.method === 'DELETE') {
+      return callback(null, true)
+    }
+
     // // Allow users to charge their cards
     // else if (req.method === 'PUT') {
     //   return StripeCustomer.exists({id: req.params.id, user_id: user.id}, callback)
@@ -92,12 +97,6 @@ export default function createStripeController(_options) {
 
     })
 
-
-      // const customer = new StripeCustomer({token, user_id})
-      // customer.save(err => {
-      //   if (err) return sendError(res, err, 'Error saving payment information')
-      //   res.json({id: customer.id})
-      // })
   }
 
   function listCards(req, res) {
@@ -116,7 +115,7 @@ export default function createStripeController(_options) {
 
   function deleteCard(req, res) {
     const user_id = req.user.id
-    const cardId = req.body.id
+    const cardId = req.params.id
 
     // Check for an existing (local) stripe customer record
     StripeCustomer.findOne({user_id}, (err, customer) => {
@@ -139,7 +138,7 @@ export default function createStripeController(_options) {
 
   app.post(`${options.route}/cards`, auth, createCard)
   app.get(`${options.route}/cards`, auth, listCards)
-  app.delete(`${options.route}/cards`, auth, deleteCard)
+  app.delete(`${options.route}/cards/:id`, auth, deleteCard)
 
   app.post(`${options.route}/charge`, auth, chargeCard)
 

@@ -12,14 +12,15 @@ function createApp() {
   return {
     get: spy(),
     post: spy(),
-    del: spy(),
+    delete: spy(),
   }
 }
 
-function createReq(query={}, body={}) {
+function createReq(query={}, body={}, params={}) {
   return {
     query,
     body,
+    params,
     user,
   }
 }
@@ -125,11 +126,10 @@ describe('StripeController', () => {
       assert.equal(json.length, 1)
 
       const id = json[0].id
-      const req = createReq({}, {id})
+      const req = createReq({}, {}, {id})
       const res = createRes(json => {
         assert.ok(json)
         assert.ifError(res.status.called)
-
 
         listCards(createReq(), createRes(json => {
           assert.ok(json)
