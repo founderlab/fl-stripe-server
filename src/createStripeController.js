@@ -104,7 +104,7 @@ export default function createStripeController(_options) {
 
     StripeCustomer.findOne({user_id}, (err, customer) => {
       if (err) return sendError(res, err, 'Error retrieving payment information')
-      if (!customer) return res.status(404)
+      if (!customer) return res.json([])
 
       stripe.customers.listCards(customer.get('stripeId'), (err, json) => {
         if (err) return sendError(res, err, 'Stripe error retrieving payment information')
@@ -131,6 +131,11 @@ export default function createStripeController(_options) {
   }
 
   function chargeCard(req, res) {
+
+    // charge = {
+    //    customer: customerId,
+    //    source: cardId,
+    // }
     return res.json({})
   }
 
