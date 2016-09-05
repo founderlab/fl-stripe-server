@@ -62,6 +62,7 @@ export default function createStripeController(_options) {
     StripeCustomer.findOne({user_id}, (err, _customer) => {
       if (err) return sendError(res, err, 'Error creating new customer')
       customer = _customer
+      let card = {}
       const queue = new Queue(1)
 
       // Create a new customer if we don't have one
@@ -70,7 +71,9 @@ export default function createStripeController(_options) {
           stripe.customers.create({description: `User ${req.user.get('email')}`, source: token}, (err, customerJSON) => {
             if (err) return sendError(res, err, 'Stripe error creating customer')
 
+            if (customerJSON.sources && customerJSON.sources.data) card = customerJSON.sources.data[0]
             customer = new StripeCustomer({user_id, stripeId: customerJSON.id})
+
             customer.save(err => {
               if (err) return sendError(res, err, 'Error saving new customer')
               callback()
@@ -83,8 +86,9 @@ export default function createStripeController(_options) {
       // Add the new card to the current record if we do
       else {
         queue.defer(callback => {
-          stripe.customers.createSource(customer.get('stripeId'), {source: token}, err => {
+          stripe.customers.createSource(customer.get('stripeId'), {source: token}, (err, _card) => {
             if (err) return sendError(res, err, 'Stripe error creating new card')
+            card = _card
             callback()
           })
         })
@@ -92,7 +96,7 @@ export default function createStripeController(_options) {
 
       queue.await(err => {
         if (err) return sendError(res, err)
-        res.json({id: customer.id})
+        res.json(_.pick(card, options.cardWhitelist))
       })
 
     })
