@@ -51,12 +51,11 @@ describe('StripeController', () => {
     done()
   })
 
-  it('Can create a customer', done => {
+  it('Can create a customer without a token', done => {
     const {createCard} = createStripeController(createOptions())
 
     createCard(createReq(), createRes(json => {
       assert.ok(json)
-      assert.ok(json.id)
 
       StripeCustomer.cursor({user_id: user.id}).toJSON((err, custs) => {
         assert.ifError(err)
@@ -64,9 +63,7 @@ describe('StripeController', () => {
         assert.equal(custs.length, 1)
         done()
       })
-
     }))
-
   })
 
   it('Can add a card using a token', done => {
