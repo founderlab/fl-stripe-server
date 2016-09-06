@@ -114,8 +114,6 @@ export default function createStripeController(_options) {
         if (err) return sendError(res, err, 'Stripe error retrieving payment information')
 
         stripe.customers.listCards(stripeId, (err, json) => {
-          console.log('remoteCustomer', remoteCustomer)
-          console.log('STRIPEjson', json)
           if (err) return sendError(res, err, 'Stripe error retrieving payment information')
 
           res.json(_.map(json.data, card => {

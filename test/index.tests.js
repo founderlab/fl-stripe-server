@@ -1,3 +1,4 @@
+import _ from 'lodash'
 import assert from 'assert'
 import {spy} from 'sinon'
 import {createStripeController, createStripeCustomer} from '../src'
@@ -7,10 +8,12 @@ const stripe = require('stripe')(process.env.STRIPE_API_KEY)
 const StripeCustomer = createStripeCustomer(User)
 
 const user = new User({email: 'a@b.co'})
+let expectedCardCount = 0
 
 function createApp() {
   return {
     get: spy(),
+    put: spy(),
     post: spy(),
     delete: spy(),
   }
@@ -73,12 +76,32 @@ describe('StripeController', () => {
       card: {
         number: '4242424242424242',
         exp_month: '12',
-        exp_year: '2017',
+        exp_year: '2030',
         cvc: '123',
       },
     }, (err, token) => {
       createCard(createReq({}, {token: token.id}), createRes(json => {
         assert.ok(json)
+        expectedCardCount = 1
+        done()
+      }))
+    })
+  })
+
+  it('Can add another card using a token', done => {
+    const {createCard} = createStripeController(createOptions())
+
+    stripe.tokens.create({
+      card: {
+        number: '4242424242424242',
+        exp_month: '10',
+        exp_year: '2030',
+        cvc: '321',
+      },
+    }, (err, token) => {
+      createCard(createReq({}, {token: token.id}), createRes(json => {
+        assert.ok(json)
+        expectedCardCount = 2
         done()
       }))
     })
@@ -89,7 +112,7 @@ describe('StripeController', () => {
 
     listCards(createReq(), createRes(json => {
       assert.ok(json)
-      assert.equal(json.length, 1)
+      assert.equal(json.length, expectedCardCount)
       done()
     }))
 
@@ -100,7 +123,7 @@ describe('StripeController', () => {
 
     listCards(createReq(), createRes(json => {
       assert.ok(json)
-      assert.equal(json.length, 1)
+      assert.equal(json.length, expectedCardCount)
 
       const id = json[0].id
       const req = createReq({}, {id})
@@ -115,12 +138,12 @@ describe('StripeController', () => {
 
   })
 
-  it('Can delete a card', done => {
-    const {listCards, deleteCard} = createStripeController(createOptions())
+  it('Can change the default card', done => {
+    const {listCards, setDefaultCard} = createStripeController(createOptions())
 
     listCards(createReq(), createRes(json => {
       assert.ok(json)
-      assert.equal(json.length, 1)
+      assert.equal(json.length, expectedCardCount)
 
       const id = json[0].id
       const req = createReq({}, {}, {id})
@@ -130,14 +153,42 @@ describe('StripeController', () => {
 
         listCards(createReq(), createRes(json => {
           assert.ok(json)
-          assert.equal(json.length, 0)
+          assert.equal(json.length, expectedCardCount)
+          const newDefaultCard = _.find(json, c => c.id ===id)
+          const notDefaultCard = _.find(json, c => c.id !==id)
+          assert.ok(newDefaultCard.default)
+          assert.ok(!notDefaultCard.default)
+          done()
+        }))
+      })
+
+      setDefaultCard(req, res)
+    }))
+  })
+
+  it('Can delete a card', done => {
+    const {listCards, deleteCard} = createStripeController(createOptions())
+
+    listCards(createReq(), createRes(json => {
+      assert.ok(json)
+      assert.equal(json.length, expectedCardCount)
+
+      const id = json[0].id
+      const req = createReq({}, {}, {id})
+      const res = createRes(json => {
+        assert.ok(json)
+        assert.ifError(res.status.called)
+        expectedCardCount = 1
+
+        listCards(createReq(), createRes(json => {
+          assert.ok(json)
+          assert.equal(json.length, expectedCardCount)
           done()
         }))
       })
 
       deleteCard(req, res)
     }))
-
   })
 
 })
