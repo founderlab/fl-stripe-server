@@ -36,7 +36,7 @@ export default function createStripeController(_options) {
     }
 
     // Allow creating for logged in user, charging cards
-    else if (req.method === 'POST' && req.body.user_id === user.id.toString()) {
+    else if ((req.method === 'POST' || req.method === 'PUT') && req.body.user_id === user.id.toString()) {
       return callback(null, true)
     }
 
@@ -100,7 +100,6 @@ export default function createStripeController(_options) {
       })
 
     })
-
   }
 
   function listCards(req, res) {
@@ -109,10 +108,38 @@ export default function createStripeController(_options) {
     StripeCustomer.findOne({user_id}, (err, customer) => {
       if (err) return sendError(res, err, 'Error retrieving payment information')
       if (!customer) return res.json([])
+      const stripeId = customer.get('stripeId')
 
-      stripe.customers.listCards(customer.get('stripeId'), (err, json) => {
+      stripe.customers.retrieve(stripeId, (err, remoteCustomer) => {
         if (err) return sendError(res, err, 'Stripe error retrieving payment information')
-        res.json(_.map(json.data, card => _.pick(card, options.cardWhitelist)))
+
+        stripe.customers.listCards(stripeId, (err, json) => {
+          console.log('remoteCustomer', remoteCustomer)
+          console.log('STRIPEjson', json)
+          if (err) return sendError(res, err, 'Stripe error retrieving payment information')
+
+          res.json(_.map(json.data, card => {
+            const cardData = _.pick(card, options.cardWhitelist)
+            cardData.default = remoteCustomer.default_source === cardData.id
+            return cardData
+          }))
+        })
+      })
+    })
+  }
+
+  function setDefaultCard(req, res) {
+    const user_id = req.user.id
+    const cardId = req.body.id
+
+    // Check for an existing (local) stripe customer record
+    StripeCustomer.findOne({user_id}, (err, customer) => {
+      if (err) return sendError(res, err, 'Error retrieving customer')
+      if (!customer) return res.status(404)
+
+      stripe.customers.update(customer.get('stripeId'), {default_source: cardId}, err => {
+        if (err) return sendError(res, err, 'Stripe error setting default card')
+        res.json({})
       })
     })
   }
@@ -131,7 +158,6 @@ export default function createStripeController(_options) {
         res.json({id: customer.id})
       })
     })
-
   }
 
   function chargeCard(req, res) {
@@ -147,6 +173,7 @@ export default function createStripeController(_options) {
 
   app.post(`${options.route}/cards`, auth, createCard)
   app.get(`${options.route}/cards`, auth, listCards)
+  app.put(`${options.route}/cards/default`, auth, setDefaultCard)
   app.delete(`${options.route}/cards/:id`, auth, deleteCard)
 
   app.post(`${options.route}/charge`, auth, chargeCard)
@@ -157,6 +184,7 @@ export default function createStripeController(_options) {
     listCards,
     deleteCard,
     chargeCard,
+    setDefaultCard,
     StripeCustomer,
   }
 }
