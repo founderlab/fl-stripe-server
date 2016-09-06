@@ -118,26 +118,6 @@ describe('StripeController', () => {
 
   })
 
-  it('Can charge a card', done => {
-    const {listCards, chargeCard} = createStripeController(createOptions())
-
-    listCards(createReq(), createRes(json => {
-      assert.ok(json)
-      assert.equal(json.length, expectedCardCount)
-
-      const id = json[0].id
-      const req = createReq({}, {id})
-      const res = createRes(json => {
-        assert.ok(json)
-        assert.ifError(res.status.called)
-        done()
-      })
-
-      chargeCard(req, res)
-    }))
-
-  })
-
   it('Can change the default card', done => {
     const {listCards, setDefaultCard} = createStripeController(createOptions())
 
@@ -188,6 +168,16 @@ describe('StripeController', () => {
       })
 
       deleteCard(req, res)
+    }))
+  })
+
+  it('Can charge a customer', done => {
+    const {chargeCustomer} = createStripeController(createOptions())
+
+    chargeCustomer(createReq({}, {amount: 3000, user_id: user.id}), createRes(json => {
+      assert.ok(json)
+      assert.ok(json.ok)
+      done()
     }))
   })
 

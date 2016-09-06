@@ -8,6 +8,8 @@ const defaults = {
   route: '/api/stripe',
   manualAuthorisation: false,
   cardWhitelist: ['id', 'country', 'brand', 'last4'],
+  currency: 'aud',
+  maxAmount: 500 * 100, // $500
 }
 
 function sendError(res, err, msg) {
@@ -44,11 +46,6 @@ export default function createStripeController(_options) {
     else if (req.method === 'DELETE') {
       return callback(null, true)
     }
-
-    // // Allow users to charge their cards
-    // else if (req.method === 'PUT') {
-    //   return StripeCustomer.exists({id: req.params.id, user_id: user.id}, callback)
-    // }
 
     callback(null, false)
   }
@@ -137,7 +134,7 @@ export default function createStripeController(_options) {
 
       stripe.customers.update(customer.get('stripeId'), {default_source: cardId}, err => {
         if (err) return sendError(res, err, 'Stripe error setting default card')
-        res.json({})
+        res.json({ok: true})
       })
     })
   }
@@ -158,13 +155,27 @@ export default function createStripeController(_options) {
     })
   }
 
-  function chargeCard(req, res) {
+  function chargeCustomer(req, res) {
+    const user_id = req.user.id
 
-    // charge = {
-    //    customer: customerId,
-    //    source: cardId,
-    // }
-    return res.json({})
+    // Check for an existing (local) stripe customer record
+    StripeCustomer.findOne({user_id}, (err, customer) => {
+      if (err) return sendError(res, err, 'Error creating new customer')
+      if (!customer) return res.status(404)
+
+      const amount = +req.body.amount
+      if (!amount) return res.status(400).send('[fl-stripe-server] Missing an amount to charge')
+      if (amount > options.maxAmount) return res.status(401).send('[fl-stripe-server] Charge exceeds the configured maximum amount')
+
+      stripe.charges.create({
+        amount,
+        currency: options.currency,
+        customer: customer.get('stripeId'),
+      }, err => {
+        if (err) return sendError(res, err, 'Stripe error charging customer')
+        return res.json({ok: true})
+      })
+    })
   }
 
   const auth = options.manualAuthorisation ? options.auth : [...options.auth, createAuthMiddleware({canAccess})]
@@ -174,15 +185,15 @@ export default function createStripeController(_options) {
   app.put(`${options.route}/cards/default`, auth, setDefaultCard)
   app.delete(`${options.route}/cards/:id`, auth, deleteCard)
 
-  app.post(`${options.route}/charge`, auth, chargeCard)
+  app.post(`${options.route}/charge`, auth, chargeCustomer)
 
   return {
     canAccess,
     createCard,
     listCards,
     deleteCard,
-    chargeCard,
     setDefaultCard,
+    chargeCustomer,
     StripeCustomer,
   }
 }
