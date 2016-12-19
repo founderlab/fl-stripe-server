@@ -11,7 +11,7 @@ export default function createStripeCustomer(User) {
     url = `${dbUrl}/stripe_customers`
 
     schema = () => ({
-      stripeId: 'String',
+      stripeId: 'Text',
       user: () => ['belongsTo', User],
     })
 

@@ -30,7 +30,7 @@ export default function createStripeController(_options) {
   function canAccess(options, callback) {
     const {user, req} = options
     if (!user) return callback(null, false)
-    if (user.admin || user.get('admin')) return callback(null, true)
+    if (user.admin) return callback(null, true)
 
     // Allow access for the owner of the profile
     if (req.method === 'GET' && req.query.user_id === user.id.toString()) {
