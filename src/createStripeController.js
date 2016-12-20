@@ -52,11 +52,10 @@ export default function createStripeController(_options) {
 
   function createCard(req, res) {
     const token = req.body.token // obtained with Stripe.js
-    const user_id = req.user.id
     let customer = null
 
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id}, (err, _customer) => {
+    StripeCustomer.findOne({user_id: req.user.id}, (err, _customer) => {
       if (err) return sendError(res, err, 'Error creating new customer')
       customer = _customer
       let card = {}
@@ -65,11 +64,11 @@ export default function createStripeController(_options) {
       // Create a new customer if we don't have one
       if (!customer) {
         queue.defer(callback => {
-          stripe.customers.create({description: `User ${req.user.get('email')}`, source: token}, (err, customerJSON) => {
+          stripe.customers.create({description: `User ${req.user.email}`, source: token}, (err, customerJSON) => {
             if (err) return sendError(res, err, 'Stripe error creating customer')
 
             if (customerJSON.sources && customerJSON.sources.data) card = customerJSON.sources.data[0]
-            customer = new StripeCustomer({user_id, stripeId: customerJSON.id})
+            customer = new StripeCustomer({user_id: req.user.id, stripeId: customerJSON.id})
 
             customer.save(err => {
               if (err) return sendError(res, err, 'Error saving new customer')
@@ -100,9 +99,7 @@ export default function createStripeController(_options) {
   }
 
   function listCards(req, res) {
-    const user_id = req.user.id
-
-    StripeCustomer.findOne({user_id}, (err, customer) => {
+    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
       if (err) return sendError(res, err, 'Error retrieving payment information')
       if (!customer) return res.json([])
       const stripeId = customer.get('stripeId')
@@ -124,11 +121,10 @@ export default function createStripeController(_options) {
   }
 
   function setDefaultCard(req, res) {
-    const user_id = req.user.id
     const cardId = req.body.id
 
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id}, (err, customer) => {
+    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
       if (err) return sendError(res, err, 'Error retrieving customer')
       if (!customer) return res.status(404)
 
@@ -140,11 +136,10 @@ export default function createStripeController(_options) {
   }
 
   function deleteCard(req, res) {
-    const user_id = req.user.id
     const cardId = req.params.id
 
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id}, (err, customer) => {
+    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
       if (err) return sendError(res, err, 'Error creating new customer')
       if (!customer) return res.status(404)
 
@@ -156,10 +151,8 @@ export default function createStripeController(_options) {
   }
 
   function chargeCustomer(req, res) {
-    const user_id = req.user.id
-
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id}, (err, customer) => {
+    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
       if (err) return sendError(res, err, 'Error creating new customer')
       if (!customer) return res.status(404)
 
