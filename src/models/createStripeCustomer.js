@@ -12,6 +12,7 @@ export default function createStripeCustomer(User) {
 
     schema = () => ({
       stripeId: 'Text',
+      createdDate: 'DateTime',
       user: () => ['belongsTo', User],
     })
 
