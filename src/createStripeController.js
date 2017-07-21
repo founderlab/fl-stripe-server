@@ -171,6 +171,26 @@ export default function createStripeController(_options) {
     })
   }
 
+  function listPlans(req, res) {
+    console.log('listPlans')
+    stripe.plans.list((err, json) => {
+      console.log('response', err, json)
+      if (err) return sendError(res, err, 'Stripe error retrieving plans')
+      res.json(json.data)
+    })
+  }
+
+
+  function showSubscription(req, res) {
+    const {userId} = req.params
+
+  }
+
+  function setSubscription(req, res) {
+    const {userId, subscriptionId} = req.params
+
+  }
+
   const auth = options.manualAuthorisation ? options.auth : [...options.auth, createAuthMiddleware({canAccess})]
 
   app.post(`${options.route}/cards`, auth, createCard)
@@ -180,6 +200,12 @@ export default function createStripeController(_options) {
 
   app.post(`${options.route}/charge`, auth, chargeCustomer)
 
+  app.get(`${options.route}/plans`, listPlans)
+
+  app.get(`${options.route}/user/:userId/subscription`, auth, showSubscription)
+  app.post(`${options.route}/user/:userId/subscription/:subscriptionId`, auth, setSubscription)
+  app.put(`${options.route}/user/:userId/subscription/:subscriptionId`, auth, setSubscription)
+
   return {
     canAccess,
     createCard,
@@ -187,6 +213,7 @@ export default function createStripeController(_options) {
     deleteCard,
     setDefaultCard,
     chargeCustomer,
+    listPlans,
     StripeCustomer,
   }
 }
