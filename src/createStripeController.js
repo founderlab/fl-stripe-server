@@ -14,7 +14,7 @@ const defaults = {
 
 function sendError(res, err, msg) {
   console.log('[fl-stripe-server] error:', err)
-  res.status(500).send(msg)
+  res.status(500).send(msg || err && err.toString())
 }
 
 export default function createStripeController(_options) {
@@ -28,64 +28,47 @@ export default function createStripeController(_options) {
 
   // Authorisation check. Make sure we can only work with cards (StripeCustomer models) belonging to the logged in user
   function canAccess(options, callback) {
-    const {user, req} = options
+    const {user} = options
     if (!user) return callback(null, false)
     if (user.admin) return callback(null, true)
-
-    // Allow access for the owner of the profile
-    if (req.method === 'GET' && req.query.user_id === user.id.toString()) {
-      return callback(null, true)
-    }
-
-    // Allow creating for logged in user, charging cards
-    else if ((req.method === 'POST' || req.method === 'PUT') && req.body.user_id === user.id.toString()) {
-      return callback(null, true)
-    }
-
-    // We'll set the user id to the logged in user when calling the stripe api, so Stripe will deny any invalid card ids
-    else if (req.method === 'DELETE') {
-      return callback(null, true)
-    }
-
-    callback(null, false)
+    // No additional options; use the logged in user id as the context for all interactions wth Stripe
+    callback(null, true)
   }
 
   function createCard(req, res) {
     const token = req.body.token // obtained with Stripe.js
-    let customer = null
+    const userId = req.user.id
 
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id: req.user.id}, (err, _customer) => {
+    StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
       if (err) return sendError(res, err, 'Error creating new customer')
-      customer = _customer
       let card = {}
       const queue = new Queue(1)
 
-      // Create a new customer if we don't have one
-      if (!customer) {
+      // Add the new card to the current record if it exists
+      if (customer) {
+        queue.defer(callback => {
+          stripe.customers.createSource(customer.stripeId, {source: token}, (err, _card) => {
+            if (err) return callback(new Error('Stripe error creating new card'))
+            card = _card
+            callback()
+          })
+        })
+      }
+
+      // Otherwise create a new customer with the given card token
+      else {
         queue.defer(callback => {
           stripe.customers.create({description: `User ${req.user.email}`, source: token}, (err, customerJSON) => {
             if (err) return sendError(res, err, 'Stripe error creating customer')
 
             if (customerJSON.sources && customerJSON.sources.data) card = customerJSON.sources.data[0]
-            customer = new StripeCustomer({user_id: req.user.id, stripeId: customerJSON.id})
+            const customerModel = new StripeCustomer({user_id: userId, stripeId: customerJSON.id})
 
-            customer.save(err => {
-              if (err) return sendError(res, err, 'Error saving new customer')
+            customerModel.save(err => {
+              if (err) return callback(new Error('Error saving new customer'))
               callback()
             })
-          })
-
-        })
-      }
-
-      // Add the new card to the current record if we do
-      else {
-        queue.defer(callback => {
-          stripe.customers.createSource(customer.get('stripeId'), {source: token}, (err, _card) => {
-            if (err) return sendError(res, err, 'Stripe error creating new card')
-            card = _card
-            callback()
           })
         })
       }
@@ -94,20 +77,21 @@ export default function createStripeController(_options) {
         if (err) return sendError(res, err)
         res.json(_.pick(card, options.cardWhitelist))
       })
-
     })
   }
 
   function listCards(req, res) {
-    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
-      if (err) return sendError(res, err, 'Error retrieving payment information')
-      if (!customer) return res.json([])
-      const stripeId = customer.get('stripeId')
+    const userId = req.user.id
 
-      stripe.customers.retrieve(stripeId, (err, remoteCustomer) => {
+    // Check for an existing (local) stripe customer record
+    StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
+      if (err) return sendError(res, err, `Error retrieving customer for user ${userId}`)
+      if (!customer) return res.json([])
+
+      stripe.customers.retrieve(customer.stripeId, (err, remoteCustomer) => {
         if (err) return sendError(res, err, 'Stripe error retrieving payment information')
 
-        stripe.customers.listCards(stripeId, (err, json) => {
+        stripe.customers.listCards(customer.stripeId, (err, json) => {
           if (err) return sendError(res, err, 'Stripe error retrieving payment information')
 
           res.json(_.map(json.data, card => {
@@ -121,14 +105,14 @@ export default function createStripeController(_options) {
   }
 
   function setDefaultCard(req, res) {
-    const cardId = req.body.id
+    const userId = req.user.id
 
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
-      if (err) return sendError(res, err, 'Error retrieving customer')
+    StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
+      if (err) return sendError(res, err, `Error retrieving customer for user ${userId}`)
       if (!customer) return res.status(404)
 
-      stripe.customers.update(customer.get('stripeId'), {default_source: cardId}, err => {
+      stripe.customers.update(customer.stripeId, {default_source: cardId}, err => {
         if (err) return sendError(res, err, 'Stripe error setting default card')
         res.json({ok: true})
       })
@@ -136,14 +120,14 @@ export default function createStripeController(_options) {
   }
 
   function deleteCard(req, res) {
-    const cardId = req.params.id
+    const userId = req.user.id
 
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
-      if (err) return sendError(res, err, 'Error creating new customer')
+    StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
+      if (err) return sendError(res, err, `Error retrieving customer for user ${userId}`)
       if (!customer) return res.status(404)
 
-      stripe.customers.deleteCard(customer.get('stripeId'), cardId, err => {
+      stripe.customers.deleteCard(customer.stripeId, cardId, err => {
         if (err) return sendError(res, err, 'Stripe error creating new card')
         res.json({id: customer.id})
       })
@@ -151,9 +135,11 @@ export default function createStripeController(_options) {
   }
 
   function chargeCustomer(req, res) {
+    const userId = req.user.id
+
     // Check for an existing (local) stripe customer record
-    StripeCustomer.findOne({user_id: req.user.id}, (err, customer) => {
-      if (err) return sendError(res, err, 'Error creating new customer')
+    StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
+      if (err) return sendError(res, err, `Error retrieving customer for user ${userId}`)
       if (!customer) return res.status(404)
 
       const amount = +req.body.amount
@@ -163,7 +149,7 @@ export default function createStripeController(_options) {
       stripe.charges.create({
         amount,
         currency: options.currency,
-        customer: customer.get('stripeId'),
+        customer: customer.stripeId,
       }, err => {
         if (err) return sendError(res, err, 'Stripe error charging customer')
         return res.json({ok: true})
@@ -172,23 +158,55 @@ export default function createStripeController(_options) {
   }
 
   function listPlans(req, res) {
-    console.log('listPlans')
     stripe.plans.list((err, json) => {
-      console.log('response', err, json)
       if (err) return sendError(res, err, 'Stripe error retrieving plans')
       res.json(json.data)
     })
   }
 
-
   function showSubscription(req, res) {
-    const {userId} = req.params
+    const cardId = req.params.id
+    const userId = req.user.id
 
+    // Check for an existing (local) stripe customer record
+    StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
+      if (err) return sendError(res, err, `Error retrieving customer for user ${userId}`)
+      if (!customer) return res.status(404)
+
+      stripe.customers.deleteCard(customer.stripeId, cardId, err => {
+        if (err) return sendError(res, err, 'Stripe error creating new card')
+        res.json({id: customer.id})
+      })
+    })
   }
 
-  function setSubscription(req, res) {
-    const {userId, subscriptionId} = req.params
+  function subscribeToPlan(req, res) {
+    const {planId} = req.params
+    const userId = req.user.id
 
+    // Check for an existing (local) stripe customer record
+    StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
+      if (err) return sendError(res, err, `Error retrieving customer for user ${userId}`)
+      if (!customer) return res.status(404)
+
+      let subscription
+      const queue = new Queue(1)
+
+      queue.defer(callback => {
+        stripe.subscriptions.create({customer: customer.stripeId, plan: planId}, (err, _subscription) => {
+          if (err) return callback(new Error('Stripe error subscribing to plan'))
+          subscription = _subscription
+          callback()
+        })
+      })
+
+      if (options.onSubscribe) queue.defer(callback => options.onSubscribe({user: req.user, planId, subscription}, callback))
+
+      queue.await(err => {
+        if (err) return sendError(res, err)
+        res.json({subscription})
+      })
+    })
   }
 
   const auth = options.manualAuthorisation ? options.auth : [...options.auth, createAuthMiddleware({canAccess})]
@@ -202,9 +220,8 @@ export default function createStripeController(_options) {
 
   app.get(`${options.route}/plans`, listPlans)
 
-  app.get(`${options.route}/user/:userId/subscription`, auth, showSubscription)
-  app.post(`${options.route}/user/:userId/subscription/:subscriptionId`, auth, setSubscription)
-  app.put(`${options.route}/user/:userId/subscription/:subscriptionId`, auth, setSubscription)
+  app.get(`${options.route}/subscription`, auth, showSubscription)
+  app.put(`${options.route}/subscribe/:planId`, auth, subscribeToPlan)
 
   return {
     canAccess,
