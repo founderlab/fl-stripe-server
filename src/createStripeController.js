@@ -10,6 +10,7 @@ import {
   setDefaultCard,
   chargeCustomer,
   listPlans,
+  subscribeToPlan,
 } from './interface'
 
 const defaults = {
