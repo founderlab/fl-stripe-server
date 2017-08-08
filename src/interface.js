@@ -141,7 +141,7 @@ function showSubscription(options, callback) {
 
 // Set a users plan, changing the current one if it exists
 function subscribeToPlan(options, callback) {
-  const {stripe, userId, planId, StripeCustomer} = options
+  const {stripe, userId, planId, coupon, StripeCustomer} = options
 
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
     if (err) return handleError(err, `Error retrieving customer for user ${user.id}`, callback)
@@ -149,12 +149,14 @@ function subscribeToPlan(options, callback) {
 
     let subscription
     const currentSubscriptionId = customer.subscriptionId
+    const subscriptionOptions = {plan: planId}
+    if (!_.isUndefined(coupon)) subscriptionOptions.coupon = coupon
     const queue = new Queue(1)
 
     // If a subscription exists update it to the new plan
     if (currentSubscriptionId) {
       queue.defer(callback => {
-        stripe.subscriptions.update(currentSubscriptionId, {plan: planId}, (err, _subscription) => {
+        stripe.subscriptions.update(currentSubscriptionId, subscriptionOptions, (err, _subscription) => {
           if (err) return handleError(err, 'Stripe error subscribing to plan', callback)
           subscription = _subscription
           callback()
@@ -164,7 +166,8 @@ function subscribeToPlan(options, callback) {
     // Otherwise create a new subscription
     else {
       queue.defer(callback => {
-        stripe.subscriptions.create({customer: customer.stripeId, plan: planId}, (err, _subscription) => {
+        subscriptionOptions.customer = customer.stripeId
+        stripe.subscriptions.create(subscriptionOptions, (err, _subscription) => {
           if (err) return handleError(err, 'Stripe error subscribing to plan', callback)
           subscription = _subscription
           callback()

@@ -1,5 +1,4 @@
 import _ from 'lodash'
-import Queue from 'queue-async'
 import createStripe from 'stripe'
 import {createAuthMiddleware} from 'fl-auth-server'
 import createStripeCustomer from './models/createStripeCustomer'
@@ -115,9 +114,10 @@ export default function createStripeController(_options) {
 
   function handleSubscribeToPlan(req, res) {
     const {planId} = req.params
+    const {coupon} = req.body
     const userId = req.user.id
 
-    subscribeToPlan({stripe, userId, planId, StripeCustomer, onSubscribe: options.onSubscribe}, (err, subscription) => {
+    subscribeToPlan({stripe, userId, planId, coupon, StripeCustomer, onSubscribe: options.onSubscribe}, (err, subscription) => {
       if (err) return sendError(res, err)
       if (!subscription) return res.status(404).send('[fl-stripe-server] Subscription not found for current user')
       res.json(subscription)
