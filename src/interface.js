@@ -1,12 +1,17 @@
 import _ from 'lodash'
 import Queue from 'queue-async'
 
+const handleError = (err, message, callback) => {
+  console.error(err)
+  return callback(new Error(message))
+}
+
 function createCard(options, callback) {
   const {stripe, source, userId, description, StripeCustomer} = options
 
   // Check for an existing (local) stripe customer record
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
-    if (err) return callback(new Error('Error creating new customer'))
+    if (err) return handleError(err, 'Error creating new customer', callback)
     let card = {}
     const queue = new Queue(1)
 
@@ -14,7 +19,7 @@ function createCard(options, callback) {
     if (customer) {
       queue.defer(callback => {
         stripe.customers.createSource(customer.stripeId, {source}, (err, _card) => {
-          if (err) return callback(new Error('Stripe error creating new card'))
+          if (err) return handleError(err, 'Stripe error creating new card', callback)
           card = _card
           callback()
         })
@@ -25,13 +30,13 @@ function createCard(options, callback) {
     else {
       queue.defer(callback => {
         stripe.customers.create({description, source}, (err, customerJSON) => {
-          if (err) return callback(new Error('Stripe error creating customer'))
+          if (err) return handleError(err, 'Stripe error creating customer', callback)
 
           if (customerJSON.sources && customerJSON.sources.data) card = customerJSON.sources.data[0]
           const customerModel = new StripeCustomer({user_id: userId, stripeId: customerJSON.id})
 
           customerModel.save(err => {
-            if (err) return callback(new Error('Error saving new customer'))
+            if (err) return handleError(err, 'Error saving new customer', callback)
             callback()
           })
         })
@@ -46,14 +51,14 @@ function listCards(options, callback) {
   const {stripe, userId, StripeCustomer} = options
 
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
-    if (err) return callback(new Error(`Error retrieving customer for user ${user.id}`))
+    if (err) return handleError(err, `Error retrieving customer for user ${user.id}`, callback)
     if (!customer) return callback(null, [])
 
     stripe.customers.retrieve(customer.stripeId, (err, remoteCustomer) => {
-      if (err) return callback(new Error('Stripe error retrieving payment information'))
+      if (err) return handleError(err, 'Stripe error retrieving payment information', callback)
 
       stripe.customers.listCards(customer.stripeId, (err, json) => {
-        if (err) return callback(new Error('Stripe error retrieving payment information'))
+        if (err) return handleError(err, 'Stripe error retrieving payment information', callback)
 
         const cards = _.map(json.data, card => {
           const cardData = _.pick(card, options.cardWhitelist)
@@ -71,11 +76,11 @@ function setDefaultCard(options, callback) {
   if (!cardId) return callback(new Error('setDefaultCard requires a cardId'))
 
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
-    if (err) return callback(new Error(`Error retrieving customer for user ${user.id}`))
+    if (err) return handleError(err, `Error retrieving customer for user ${user.id}`, callback)
     if (!customer) return callback()
 
     stripe.customers.update(customer.stripeId, {default_source: cardId}, err => {
-      if (err) return callback(new Error('Stripe error setting default card'))
+      if (err) return handleError(err, 'Stripe error setting default card', callback)
       callback(null, {ok: true})
     })
   })
@@ -86,11 +91,11 @@ function deleteCard(options, callback) {
   if (!cardId) return callback(new Error('deleteCard requires a cardId'))
 
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
-    if (err) return callback(new Error(`Error retrieving customer for user ${user.id}`))
+    if (err) return handleError(err, `Error retrieving customer for user ${user.id}`, callback)
     if (!customer) return callback()
 
     stripe.customers.deleteCard(customer.stripeId, cardId, err => {
-      if (err) return callback(new Error('Stripe error creating new card'))
+      if (err) return handleError(err, 'Stripe error creating new card', callback)
       callback(null, {ok: true})
     })
   })
@@ -102,7 +107,7 @@ function chargeCustomer(options, callback) {
   if (!currency) return callback(new Error('chargeCustomer requires a currency'))
 
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
-    if (err) return callback(new Error(`Error retrieving customer for user ${user.id}`))
+    if (err) return handleError(err, `Error retrieving customer for user ${user.id}`, callback)
     if (!customer) return callback()
 
     stripe.charges.create({
@@ -110,7 +115,7 @@ function chargeCustomer(options, callback) {
       currency,
       customer: customer.stripeId,
     }, err => {
-      if (err) return callback(new Error('Stripe error charging customer'))
+      if (err) return handleError(err, 'Stripe error charging customer', callback)
       return callback(null, {ok: true})
     })
   })
@@ -118,7 +123,7 @@ function chargeCustomer(options, callback) {
 
 function listPlans(options, callback) {
   options.stripe.plans.list((err, json) => {
-    if (err) return callback(new Error('Stripe error retrieving plans'))
+    if (err) return handleError(err, 'Stripe error retrieving plans', callback)
     callback(null, json.data)
   })
 }
@@ -127,7 +132,7 @@ function showSubscription(options, callback) {
   const {stripe, userId, StripeCustomer} = options
 
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
-    if (err) return callback(new Error(`Error retrieving customer for user ${user.id}`))
+    if (err) return handleError(err, `Error retrieving customer for user ${user.id}`, callback)
     if (!customer) return callback()
 
     stripe.subscriptions.retrieve(customer.subscriptionId, callback)
@@ -139,20 +144,18 @@ function subscribeToPlan(options, callback) {
   const {stripe, userId, planId, StripeCustomer} = options
 
   StripeCustomer.cursor({user_id: userId, $one: true}).toJSON((err, customer) => {
-    if (err) return callback(new Error(`Error retrieving customer for user ${user.id}`))
+    if (err) return handleError(err, `Error retrieving customer for user ${user.id}`, callback)
     if (!customer) return callback()
 
     let subscription
     const currentSubscriptionId = customer.subscriptionId
-    console.log('currentSubscriptionId', currentSubscriptionId)
     const queue = new Queue(1)
 
     // If a subscription exists update it to the new plan
     if (currentSubscriptionId) {
       queue.defer(callback => {
         stripe.subscriptions.update(currentSubscriptionId, {plan: planId}, (err, _subscription) => {
-          if (err) return callback(new Error('Stripe error subscribing to plan'))
-            console.log('changed sub', _subscription)
+          if (err) return handleError(err, 'Stripe error subscribing to plan', callback)
           subscription = _subscription
           callback()
         })
@@ -162,7 +165,7 @@ function subscribeToPlan(options, callback) {
     else {
       queue.defer(callback => {
         stripe.subscriptions.create({customer: customer.stripeId, plan: planId}, (err, _subscription) => {
-          if (err) return callback(new Error('Stripe error subscribing to plan'))
+          if (err) return handleError(err, 'Stripe error subscribing to plan', callback)
           subscription = _subscription
           callback()
         })
