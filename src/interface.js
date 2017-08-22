@@ -139,6 +139,16 @@ function showSubscription(options, callback) {
   })
 }
 
+function getCoupon(options, callback) {
+  const {coupon} = options
+
+  options.stripe.coupons.retrieve(coupon, (err, json) => {
+    console.log('err, json', err, json)
+    if (err) return handleError(err, err.message, callback)
+    callback(null, json.data)
+  })
+}
+
 // Set a users plan, changing the current one if it exists
 function subscribeToPlan(options, callback) {
   const {stripe, userId, planId, coupon, StripeCustomer} = options
@@ -157,7 +167,7 @@ function subscribeToPlan(options, callback) {
     if (currentSubscriptionId) {
       queue.defer(callback => {
         stripe.subscriptions.update(currentSubscriptionId, subscriptionOptions, (err, _subscription) => {
-          if (err) return handleError(err, 'Stripe error subscribing to plan', callback)
+          if (err) return handleError(err, err.message, callback)
           subscription = _subscription
           callback()
         })
@@ -168,7 +178,7 @@ function subscribeToPlan(options, callback) {
       queue.defer(callback => {
         subscriptionOptions.customer = customer.stripeId
         stripe.subscriptions.create(subscriptionOptions, (err, _subscription) => {
-          if (err) return handleError(err, 'Stripe error subscribing to plan', callback)
+          if (err) return handleError(err, err.message, callback)
           subscription = _subscription
           callback()
         })
@@ -197,6 +207,7 @@ export {
   setDefaultCard,
   chargeCustomer,
   listPlans,
+  getCoupon,
   showSubscription,
   subscribeToPlan,
 }

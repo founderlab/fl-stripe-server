@@ -9,6 +9,8 @@ import {
   setDefaultCard,
   chargeCustomer,
   listPlans,
+  getCoupon,
+  showSubscription,
   subscribeToPlan,
 } from './interface'
 
@@ -22,7 +24,7 @@ const defaults = {
 
 function sendError(res, err, msg) {
   console.log('[fl-stripe-server] error:', err)
-  res.status(500).send(msg || err && err.toString())
+  res.status(500).send({error: msg || err && err.toString()})
 }
 
 export default function createStripeController(_options) {
@@ -102,6 +104,13 @@ export default function createStripeController(_options) {
     })
   }
 
+  function handleGetCoupon(req, res) {
+    getCoupon({stripe, coupon: req.params.id}, (err, coupon) => {
+      if (err) return sendError(res, err)
+      res.json(coupon)
+    })
+  }
+
   function handleShowSubscription(req, res) {
     const userId = req.user.id
 
@@ -135,6 +144,8 @@ export default function createStripeController(_options) {
 
   app.get(`${options.route}/plans`, handleListPlans)
 
+  app.get(`${options.route}/coupons/:id`, handleGetCoupon)
+
   app.get(`${options.route}/subscription`, auth, handleShowSubscription)
   app.put(`${options.route}/subscribe/:planId`, auth, handleSubscribeToPlan)
 
@@ -146,6 +157,7 @@ export default function createStripeController(_options) {
     handleSetDefaultCard,
     handleChargeCustomer,
     handleListPlans,
+    handleGetCoupon,
     handleShowSubscription,
     handleSubscribeToPlan,
     StripeCustomer,
