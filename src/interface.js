@@ -145,7 +145,7 @@ function getCoupon(options, callback) {
   options.stripe.coupons.retrieve(coupon, (err, json) => {
     console.log('err, json', err, json)
     if (err) return handleError(err, err.message, callback)
-    callback(null, json.data)
+    callback(null, json)
   })
 }
 
